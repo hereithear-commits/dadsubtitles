@@ -12,51 +12,61 @@ def format_time(seconds):
 
 def transcribe_slovak_bulletproof(video_path):
     print(f"\n[1/3] Initializing offline 'large-v3' model on CPU...")
-    
-    # Initialize large-v3 with optimized int8 execution for stable CPU performance
     model = WhisperModel("large-v3", device="cpu", compute_type="int8")
     
     print(f"[2/3] Filtering audio and transcribing Slovak text...")
-    
-    # Advanced parameters to eliminate timeline skipping, hallucinations, and repetition loops
     segments, info = model.transcribe(
         video_path, 
         language="sk", 
         word_timestamps=True,
-        vad_filter=True,                                                 # Strips out non-speech/silence before processing
-        vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5), # Aggressive voice activity thresholds
-        condition_on_previous_text=False,                                # Prevents the 'repetition loop' feedback error
-        beam_size=5,                                                     # Tracks multiple paths to ensure baseline accuracy
-        compression_ratio_threshold=2.4,                                 # Catches and drops repetitive junk text patterns
-        no_speech_threshold=0.6                                          # Ignores low-confidence ambient background sound
+        vad_filter=True,                                                
+        vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5), 
+        condition_on_previous_text=False,                                
+        beam_size=5,                                                     
+        compression_ratio_threshold=2.4,                                 
+        no_speech_threshold=0.6                                          
     )
     
-    all_words = []
-    for segment in segments:
-        if hasattr(segment, 'words') and segment.words:
-            for word in segment.words:
-                all_words.append(word)
-                
-    if not all_words:
-        print("[-] Error: No speech detected in the video file.")
-        return
-
-    print(f"[3/3] Enforcing strict 3-word pacing rule...")
+    print(f"[3/3] Enforcing segment-aware 3-word pacing with pause detection...")
     output_srt_path = os.path.splitext(video_path)[0] + ".srt"
     
     counter = 1
     with open(output_srt_path, "w", encoding="utf-8") as srt_file:
-        for i in range(0, len(all_words), 3):
-            chunk = all_words[i:i+3]
+        for segment in segments:
+            if not hasattr(segment, 'words') or not segment.words:
+                continue
             
-            start_timestamp = format_time(chunk[0].start)
-            end_timestamp = format_time(chunk[-1].end)
-            text_line = " ".join([w.word.strip() for w in chunk])
+            current_chunk = []
+            for word in segment.words:
+                if current_chunk:
+                    # Calculate the silent gap between the last word and the current word
+                    time_gap = word.start - current_chunk[-1].end
+                    
+                    # Force-break the subtitle if it hits 3 words OR if there is a natural pause > 0.8s
+                    if len(current_chunk) >= 3 or time_gap > 0.8:
+                        start_timestamp = format_time(current_chunk[0].start)
+                        end_timestamp = format_time(current_chunk[-1].end)
+                        text_line = " ".join([w.word.strip() for w in current_chunk])
+                        
+                        srt_file.write(f"{counter}\n")
+                        srt_file.write(f"{start_timestamp} --> {end_timestamp}\n")
+                        srt_file.write(f"{text_line}\n\n")
+                        counter += 1
+                        
+                        current_chunk = []
+                
+                current_chunk.append(word)
             
-            srt_file.write(f"{counter}\n")
-            srt_file.write(f"{start_timestamp} --> {end_timestamp}\n")
-            srt_file.write(f"{text_line}\n\n")
-            counter += 1
+            # Clear out any remaining words at the end of the segment
+            if current_chunk:
+                start_timestamp = format_time(current_chunk[0].start)
+                end_timestamp = format_time(current_chunk[-1].end)
+                text_line = " ".join([w.word.strip() for w in current_chunk])
+                
+                srt_file.write(f"{counter}\n")
+                srt_file.write(f"{start_timestamp} --> {end_timestamp}\n")
+                srt_file.write(f"{text_line}\n\n")
+                counter += 1
 
     print(f"\n[SUCCESS] Flawless Slovak subtitles saved to:\n{output_srt_path}\n")
 
