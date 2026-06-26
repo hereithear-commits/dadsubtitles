@@ -19,7 +19,7 @@ jobs:
 
     - name: Compile Exe via PyInstaller
       run: |
-        pyinstaller --onefile --name="Dad_Slovak_Subtitler" make_subtitles.py
+        pyinstaller --onefile --name="Dad_Slovak_Subtitler" --collect-data faster_whisper make_subtitles.py
 
     - name: Save Finished Exe
       uses: actions/upload-artifact@v4
